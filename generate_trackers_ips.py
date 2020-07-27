@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import urllib.request
 import json
 import sys
@@ -36,6 +35,26 @@ def download_file(url, local_filename=""):
 
     return local_filename
 
+
+def is_allowed_public_ip(ip_addr):
+    """
+    :param ip_addr: str
+    :return bool
+    """
+    ip_oct = [int(x) for x in ip_addr.split('.')]
+    if all([x == 0 for x in ip_oct]):
+        return False  # 0.0.0.0 is local address
+    elif any([ip_oct[0] in (10, 127)]):
+        return False  # 10/8 https://tools.ietf.org/html/rfc1918; 127.0.0.0/8 is localhost
+    elif all([ip_oct[0] == 169, ip_oct[1] == 254]):
+        return False  # 169.254/16 https://tools.ietf.org/html/rfc3927
+    elif all([ip_oct[0] == 172, 16 <= ip_oct[1] <= 31]):
+        return False  # 172.16/12 https://tools.ietf.org/html/rfc1918
+    elif all([ip_oct[0] == 192, ip_oct[1] == 168]):
+        return False  # 192.168/16 https://tools.ietf.org/html/rfc1918
+
+    return True
+
 # tries to revolse host address to ip's;
 # returns ip's list
 def resolve_host_ips(hostname):
@@ -44,14 +63,9 @@ def resolve_host_ips(hostname):
     try:
         domain_ips = socket.gethostbyname_ex(hostname)[2]
 
-        if '0.0.0.0' in domain_ips:
-            domain_ips.remove('0.0.0.0')
-        if '127.0.0.1' in domain_ips:
-            domain_ips.remove('127.0.0.1')
-        if '127.0.0.2' in domain_ips:
-            domain_ips.remove('127.0.0.2')
-        if '127.0.0.10' in domain_ips:
-            domain_ips.remove('127.0.0.10')
+        for ip_addrs in domain_ips:
+            if not is_allowed_public_ip(ip_addrs):
+                domain_ips.remove(ip_addrs)
 
         #print('Host \'' + hostname + '\' successfully resolved to ' + str(len(domain_ips)) + ' ip\'s')
     except:
