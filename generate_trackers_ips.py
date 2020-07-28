@@ -4,10 +4,19 @@ import urllib.request
 import json
 import sys
 import socket
+import logging
 
 __author__ = 'Alexander Kamyshnikov'
 __version__ = '1.0.0'
 __email__ = 'axill777@gmail.com'
+
+def setup_logging():
+    # set up logging to file - see previous section for more details
+    logging.basicConfig(level=logging.ERROR,
+                    format='%(message)s',
+                    datefmt='%m-%d %H:%M',
+                    filename='errors.log',
+                    filemode='w')
 
 ###################################################################################################
 # Converter: host blacklist in JSON format --> blacklist of all resolved IPv4 addresses
@@ -70,7 +79,7 @@ def resolve_host_ips(hostname):
 
         #print('Host \'' + hostname + '\' successfully resolved to ' + str(len(domain_ips)) + ' ip\'s')
     except Exception as inst:
-        print("Unable to resolve host '{}': '{}'".format(hostname, inst))
+        logging.error("Unable to resolve host '{}': '{}'".format(hostname, inst))
         return []
 
     return domain_ips
@@ -112,7 +121,7 @@ def parse_exodus_list(fileName):
             for host in tracker_hosts:
                 # We unable to resolve addresses like '.my.domain.com'
                 if host.startswith('.'):
-                    print("WRN: Host pattern '{}' was simplified to '{}'!".format(host, host.lstrip('.')))
+                    logging.error("Host pattern '{}' was simplified to '{}'!".format(host, host.lstrip('.')))
                     host = host.lstrip('.')
 
                 ips = resolve_host_ips(host)
@@ -197,6 +206,7 @@ def parse_disconnect_list(fileName):
     }
 
 ###################################################################################################
+setup_logging()
 
 # 1) Exodus trackers list
 download_file("https://etip.exodus-privacy.eu.org/trackers/export", "exodus_trackers.json")
