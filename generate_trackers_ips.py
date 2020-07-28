@@ -69,17 +69,18 @@ def resolve_host_ips(hostname):
                 domain_ips.remove(ip_addrs)
 
         #print('Host \'' + hostname + '\' successfully resolved to ' + str(len(domain_ips)) + ' ip\'s')
-    except:
-        print('Unable to resolve host \'' + hostname + '\'')
+    except Exception as inst:
+        print("Unable to resolve host '{}': '{}'".format(hostname, inst))
         return []
 
     return domain_ips
 
 def parse_exodus_list(fileName):
-    blacklist_ips = []
+    blacklist_obj = {}
     total_host_count = 0
+    unresolved_host_count = 0
+    resolved_ip_count = 0
     ignored_trackers_count = 0
-    unresolved_ip_count = 0
 
     # Read entire file contents into single variable
     # NOTE: file is pretty small and can fit into RAM (~60 Kb)
@@ -92,45 +93,60 @@ def parse_exodus_list(fileName):
     json_obj = json.loads(json_text)
     trackers_array = json_obj['trackers']
     for tracker_obj in trackers_array:
+        # Get tracker name
         tracker_name = tracker_obj['name']
+
+        # Get tracker hosts (if present)
         tracker_host_pattern = tracker_obj['network_signature']
         if tracker_host_pattern != "":
             print("Processing tracker '{}'...".format(tracker_name))
+
+            # Unescape dots (JSON requirement) and regex "|" symbol (one or more)
             tracker_hosts = tracker_host_pattern.replace("\\", "").split("|")
+
             total_host_count += len(tracker_hosts)
             print("Tracker '{}' have {} hosts".format(tracker_name, len(tracker_hosts)))
 
+            # Resolve each symbolic host name to one or more IP addresses
+            hosts_obj = {}
             for host in tracker_hosts:
+                # We unable to resolve addresses like '.my.domain.com'
+                if host.startswith('.'):
+                    print("WRN: Host pattern '{}' was simplified to '{}'!".format(host, host.lstrip('.')))
+                    host = host.lstrip('.')
+
                 ips = resolve_host_ips(host)
                 if len(ips) > 0:
                     print("Tracker '{}' host '{}' resolved to {} IP addresses"
-                        .format(tracker_name, host, len(ips)))
-                    blacklist_ips.extend(ips)
+                          .format(tracker_name, host, len(ips)))
+
+                    # Save to JSON current host IP addresses list
+                    hosts_obj[host] = ips
+                    resolved_ip_count += len(ips)
                 else:
                     #print("Unable to resolve tracker '{}' host '{}'!"
                     #    .format(tracker_name, host))
-                    unresolved_ip_count += 1
+                    unresolved_host_count += 1
+       
+            # Save to JSON current tracker hosts IP addresses list
+            blacklist_obj[tracker_name] = hosts_obj
         else:
             ignored_trackers_count += 1
             print("Ignore tracker '{}'...".format(tracker_name))
 
-    # Remove duplicates from list
-    blacklist_ips = list(dict.fromkeys(blacklist_ips))
-    
-    # Sort the list
-    blacklist_ips.sort()
-
     return {
-         "blacklist_ips": blacklist_ips,
+         "blacklist_obj": blacklist_obj,
          "total_host_count": total_host_count,
          "ignored_trackers_count": ignored_trackers_count,
-         "unresolved_ip_count": unresolved_ip_count
+         "unresolved_host_count": unresolved_host_count,
+         "resolved_ip_count": resolved_ip_count
     }
 
 def parse_disconnect_list(fileName):
-    blacklist_ips = []
+    blacklist_obj = {}
     total_host_count = 0
-    unresolved_ip_count = 0
+    unresolved_host_count = 0
+    resolved_ip_count = 0
 
     # Read entire file contents into single variable
     # NOTE: file is pretty small and can fit into RAM (~200 Kb)
@@ -145,36 +161,39 @@ def parse_disconnect_list(fileName):
     categories_dict = json_obj['categories']
     for category_name in categories_dict:
         #print("Category: " + category_name)
-        for vendor_list in categories_dict[category_name]:
-            for vendor_name in vendor_list:
+        for tracker_list in categories_dict[category_name]:
+            for tracker_name in tracker_list:
                 #print("Vendor: " + vendor_name)
-                for highlevel_host in vendor_list[vendor_name]:
+                for highlevel_host in tracker_list[tracker_name]:
                     #print("High-level host: " + highlevel_host)
                     if not highlevel_host.startswith('http'):
                         continue
 
-                    total_host_count += 1
-                    lowlevel_host_list = vendor_list[vendor_name][highlevel_host]
-            
+                    lowlevel_host_list = tracker_list[tracker_name][highlevel_host]
+                    total_host_count += len(lowlevel_host_list)
+
+                    hosts_obj = {}
                     for lowlevel_host in lowlevel_host_list:
                         #print("Low-level host: " + lowlevel_host)
-                    
+
                         ips = resolve_host_ips(lowlevel_host)
                         if len(ips) > 0:
-                            blacklist_ips.extend(ips)
+                            print("Tracker '{}' host '{}' resolved to {} IP addresses"
+                                  .format(tracker_name, lowlevel_host, len(ips)))
+                            # Save to JSON current host IP addresses list
+                            hosts_obj[lowlevel_host] = ips
+                            resolved_ip_count += len(ips)
                         else:
-                            unresolved_ip_count += 1
+                            unresolved_host_count += 1
 
-    # Remove duplicates from list
-    blacklist_ips = list(dict.fromkeys(blacklist_ips))
-    
-    # Sort the list
-    blacklist_ips.sort()
+                # Save to JSON current tracker hosts IP addresses list
+                blacklist_obj[tracker_name] = hosts_obj
 
     return {
-        "blacklist_ips": blacklist_ips,
+        "blacklist_obj": blacklist_obj,
         "total_host_count": total_host_count,
-        "unresolved_ip_count": unresolved_ip_count
+        "unresolved_host_count": unresolved_host_count,
+        "resolved_ip_count": resolved_ip_count
     }
 
 ###################################################################################################
@@ -187,8 +206,8 @@ print('\n\n---------------------------------------------------------------')
 print('Exodus trackers summary')
 print('Total host count       : {}'.format(exodus_result["total_host_count"]))
 print('Ignored trackers count : {}'.format(exodus_result["ignored_trackers_count"]))
-print('Resolved IP count      : {}'.format(len(exodus_result["blacklist_ips"])))
-print('Unresolved IP count    : {}'.format(exodus_result["unresolved_ip_count"]))
+print('Resolved IP count      : {}'.format(exodus_result["resolved_ip_count"]))
+print('Unresolved host count    : {}'.format(exodus_result["unresolved_host_count"]))
 print('---------------------------------------------------------------\n\n')
 
 # 2) Disconnect.me trackers list
@@ -198,22 +217,18 @@ disconnect_result = parse_disconnect_list('disconnect_me_trackers.json')
 print('---------------------------------------------------------------')
 print('Disconnect.me trackers summary')
 print('Total host count    : {}'.format(disconnect_result["total_host_count"]))
-print('Resolved IP count   : {}'.format(len(disconnect_result["blacklist_ips"])))
-print('Unresolved IP count : {}'.format(disconnect_result["unresolved_ip_count"]))
+print('Resolved IP count   : {}'.format(disconnect_result["resolved_ip_count"]))
+print('Unresolved host count : {}'.format(disconnect_result["unresolved_host_count"]))
 print('---------------------------------------------------------------\n\n')
 
-summary_blacklist_ips = []
-summary_blacklist_ips.extend(exodus_result["blacklist_ips"])
-summary_blacklist_ips.extend(disconnect_result["blacklist_ips"])
-summary_blacklist_ips = list(dict.fromkeys(summary_blacklist_ips))
-summary_blacklist_ips.sort()
-print("Summary IP count: {}".format(len(summary_blacklist_ips)))
-
-# Save resulting IP list to text file
-output_filename = "result_ips.txt"
+# Save resulting tracker list to JSON file
+output_filename = "result_exodus.json"
 with open(output_filename, 'w') as f:
-    for ip in summary_blacklist_ips:
-        data_wrote = f.write(ip + '\n')
+    json.dump(exodus_result['blacklist_obj'], f, sort_keys=True, indent=4)
+
+output_filename = "result_disconnectme.json"
+with open(output_filename, 'w') as f:
+    json.dump(disconnect_result['blacklist_obj'], f, sort_keys=True, indent=4)
 
 sys.exit(0)
 
